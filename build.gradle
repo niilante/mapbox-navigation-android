@@ -1,7 +1,9 @@
 apply plugin: 'com.github.kt3k.coveralls'
 apply plugin: 'jacoco'
 
-buildscript {
+buildscript { 
+    ext.kotlin_version = '1.3.61'
+
   apply from: "${rootDir}/gradle/dependencies.gradle"
 
   repositories {
@@ -27,8 +29,10 @@ buildscript {
     classpath pluginDependencies.bintray
     classpath pluginDependencies.artifactory
     classpath pluginDependencies.dokka
-  }
-}
+  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version" }
+
+    
+    }
 
 task testReport(type: TestReport, group: 'Build') {
   description = 'Generates an aggregate test report'

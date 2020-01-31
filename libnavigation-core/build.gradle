@@ -22,6 +22,17 @@ android {
         targetSdkVersion androidVersions.targetSdkVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles 'proguard-consumer.pro'
+
+        buildConfigField('String',
+                "MAPBOX_NAVIGATION_SDK_IDENTIFIER", String.format("\"%s\"", "mapbox-navigation-android")
+        )
+        buildConfigField('String',
+                "MAPBOX_NAVIGATION_VERSION_NAME", String.format("\"%s\"", project.VERSION_NAME)
+        )
+        buildConfigField "String",
+                "MAPBOX_NAVIGATION_EVENTS_USER_AGENT", String.format("\"mapbox-navigation-android/%s\"",
+                project.VERSION_NAME
+        )
     }
 
     testOptions {
@@ -39,6 +50,8 @@ dependencies {
     implementation project(':libtrip-notification')
     implementation dependenciesList.mapboxSdkTurf
     implementation dependenciesList.mapboxAndroidAccounts
+    implementation dependenciesList.mapboxEvents
+    implementation project(':liblogger')
 
     //ktlint
     ktlint dependenciesList.ktlint
