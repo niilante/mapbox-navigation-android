@@ -116,7 +116,7 @@ class MapboxNavigation(
     init {
         ThreadController.init()
         ifNonNull(accessToken) { token ->
-            MapboxNavigationTelemetry.initialize(context.applicationContext, token, this)
+            MapboxNavigationTelemetry.initialize(context.applicationContext, token, this, LocationEngineProvider.getBestLocationEngine(context.applicationContext))
         }
         directionsSession = NavigationComponentProvider.createDirectionsSession(
             NavigationModuleProvider.createModule(

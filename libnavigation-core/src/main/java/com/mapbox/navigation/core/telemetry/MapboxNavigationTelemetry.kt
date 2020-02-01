@@ -2,10 +2,7 @@ package com.mapbox.navigation.core.telemetry
 
 import android.content.Context
 import android.location.Location
-import com.mapbox.android.core.location.LocationEngineCallback
-import com.mapbox.android.core.location.LocationEngineProvider
-import com.mapbox.android.core.location.LocationEngineRequest
-import com.mapbox.android.core.location.LocationEngineResult
+import com.mapbox.android.core.location.*
 import com.mapbox.android.telemetry.Event
 import com.mapbox.android.telemetry.MapboxTelemetry
 import com.mapbox.navigation.base.exceptions.NavigationException
@@ -59,7 +56,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     private val channelOnRouteProgress = Channel<RouteProgress>(Channel.CONFLATED) // we want just the last notification
     private lateinit var cleanupJob: Job
     private lateinit var mapboxTelemetry: MapboxTelemetry
-    private val locationEngine = LocationEngineProvider.getBestLocationEngine(context.applicationContext)
+    private lateinit var locationEngine: LocationEngine
 
     // Location request settings
     private val locationEngineRequest: LocationEngineRequest = LocationEngineRequest.Builder(ONE_SECOND)
@@ -119,9 +116,10 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     /**
      * One-time initializer. Called in responce to initialize() and then replaced with a no-op lambda to prevent multiple initialize() calls
      */
-    private val primaryInitializer: (Context, String, MapboxNavigation) -> Unit = { context, token, mapboxNavigation ->
+    private val primaryInitializer: (Context, String, MapboxNavigation, LocationEngine) -> Unit = { context, token, mapboxNavigation, locationEngine ->
         this.context = context
         mapboxToken = token
+        this.locationEngine = locationEngine
         val options = MapboxNavigationOptions.Builder().build()
         validateAccessToken(mapboxToken)
         initializer = postInitialize // prevent primaryInitializer() from being called more than once.
@@ -138,21 +136,14 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
         locationEngine.requestLocationUpdates(locationEngineRequest, locationCallback, null)
     }
     private var initializer = primaryInitializer
-    private var postInitialize: (Context, String, MapboxNavigation) -> Unit = { _, _, _ -> }
+    private var postInitialize: (Context, String, MapboxNavigation, LocationEngine) -> Unit = { _, _, _, _ -> }
     fun initialize(
         context: Context,
         mapboxToken: String,
-        mapboxNavigation: MapboxNavigation
+        mapboxNavigation: MapboxNavigation,
+        locationEngine: LocationEngine
     ) {
-        initializer(context, mapboxToken, mapboxNavigation)
-    }
-
-    private fun postEvent(event: TelemetryEventInterface) {
-        jobControl.scope.launch {
-            withContext(ThreadController.IODispatcher) { populateTelemetryEventWrapper(event) }?.let { telemetryEvent ->
-                updateEventsQueue(telemetryEvent)
-            }
-        }
+        initializer(context, mapboxToken, mapboxNavigation, locationEngine)
     }
 
     /**
@@ -161,6 +152,14 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
      */
     override fun postTelemetryEvent(event: TelemetryEventInterface) {
         postEventDelegate(event)
+    }
+
+    private fun postEvent(event: TelemetryEventInterface) {
+        jobControl.scope.launch {
+            withContext(ThreadController.IODispatcher) { populateTelemetryEventWrapper(event) }?.let { telemetryEvent ->
+                updateEventsQueue(telemetryEvent)
+            }
+        }
     }
 
     private fun updateEventsQueue(telemetryEvent: TelemetryEventInterface) {
