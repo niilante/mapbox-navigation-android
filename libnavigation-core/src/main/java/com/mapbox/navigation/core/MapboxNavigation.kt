@@ -7,6 +7,7 @@ import androidx.annotation.RequiresPermission
 import com.mapbox.android.core.location.LocationEngine
 import com.mapbox.android.core.location.LocationEngineProvider
 import com.mapbox.android.core.location.LocationEngineRequest
+import com.mapbox.android.telemetry.MapboxTelemetry
 import com.mapbox.annotation.navigation.module.MapboxNavigationModuleType
 import com.mapbox.api.directions.v5.models.DirectionsRoute
 import com.mapbox.api.directions.v5.models.RouteOptions
@@ -111,41 +112,53 @@ class MapboxNavigation(
     private val internalRoutesObserver = createInternalRoutesObserver()
     private val internalOffRouteObserver = createInternalOffRouteObserver()
 
+    private val MAPBOX_NAVIGATION_USER_AGENT_BASE = "mapbox-navigation-android"
     private var notificationChannelField: Field? = null
+
+    /**
+     * Obtains a user agent string based on where this code is being called from
+     */
+    private fun obtainUserAgent(): String =
+            MAPBOX_NAVIGATION_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
 
     init {
         ThreadController.init()
         ifNonNull(accessToken) { token ->
-            MapboxNavigationTelemetry.initialize(context.applicationContext, token, this, LocationEngineProvider.getBestLocationEngine(context.applicationContext))
+            MapboxNavigationTelemetry.initialize(context.applicationContext,
+                    token,
+                    this,
+                    LocationEngineProvider.getBestLocationEngine(context.applicationContext),
+                    MapboxTelemetry(context, token, obtainUserAgent()),
+                    locationEngineRequest)
         }
         directionsSession = NavigationComponentProvider.createDirectionsSession(
-            NavigationModuleProvider.createModule(
-                MapboxNavigationModuleType.OffboardRouter,
-                ::paramsProvider
-            )
+                NavigationModuleProvider.createModule(
+                        MapboxNavigationModuleType.OffboardRouter,
+                        ::paramsProvider
+                )
         )
         directionsSession.registerRoutesObserver(internalRoutesObserver)
         directionsSession.registerRoutesObserver(navigationSession)
 
         val notification: TripNotification = NavigationModuleProvider.createModule(
-            MapboxNavigationModuleType.TripNotification,
-            ::paramsProvider
+                MapboxNavigationModuleType.TripNotification,
+                ::paramsProvider
         )
         if (notification.javaClass.name == "com.mapbox.navigation.trip.notification.MapboxTripNotification") {
             notificationChannelField =
-                notification.javaClass.getDeclaredField("notificationActionButtonChannel").apply {
-                    isAccessible = true
-                }
+                    notification.javaClass.getDeclaredField("notificationActionButtonChannel").apply {
+                        isAccessible = true
+                    }
         }
         tripService = NavigationComponentProvider.createTripService(
-            context.applicationContext,
-            notification
+                context.applicationContext,
+                notification
         )
         tripSession = NavigationComponentProvider.createTripSession(
-            tripService,
-            locationEngine,
-            locationEngineRequest,
-            navigationOptions.navigatorPollingDelay()
+                tripService,
+                locationEngine,
+                locationEngineRequest,
+                navigationOptions.navigatorPollingDelay()
         )
         tripSession.registerOffRouteObserver(internalOffRouteObserver)
         tripSession.registerStateObserver(navigationSession)

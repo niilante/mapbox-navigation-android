@@ -4,7 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Build
 
-internal sealed class AudioTypeResolver {
+sealed class AudioTypeResolver {
 
     companion object {
         const val BLUETOOTH = "bluetooth"
@@ -21,7 +21,7 @@ internal sealed class AudioTypeResolver {
 
     abstract fun obtainAudioType(context: Context): String
 
-    internal class Bluetooth : AudioTypeResolver() {
+    class Bluetooth : AudioTypeResolver() {
         override fun obtainAudioType(context: Context): String {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager?
                 ?: return UNKNOWN
@@ -33,7 +33,7 @@ internal sealed class AudioTypeResolver {
         }
     }
 
-    internal class Headphones : AudioTypeResolver() {
+    class Headphones : AudioTypeResolver() {
         override fun obtainAudioType(context: Context): String {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager?
                 ?: return UNKNOWN
@@ -51,7 +51,7 @@ internal sealed class AudioTypeResolver {
         }
     }
 
-    internal class Speaker : AudioTypeResolver() {
+    class Speaker : AudioTypeResolver() {
         override fun obtainAudioType(context: Context): String {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager?
                 ?: return UNKNOWN
@@ -63,7 +63,7 @@ internal sealed class AudioTypeResolver {
         }
     }
 
-    internal class Unknown : AudioTypeResolver() {
+    class Unknown : AudioTypeResolver() {
         override fun nextChain(chain: AudioTypeResolver) {
         }
 

@@ -53,37 +53,6 @@ internal data class TelemetryUserFeedbackWrapper(
 
     override val metricName = NavigationMetrics.FEEDBACK
 
-    override fun toJson(gson: Gson) =
+    override fun toJson(gson: Gson): String =
             gson.toJson(this)
-
-    // IDE Generated code
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as TelemetryUserFeedbackWrapper
-
-        if (userFeedback != other.userFeedback) return false
-        if (userId != other.userId) return false
-        if (audio != other.audio) return false
-        if (!locationsBefore.contentEquals(other.locationsBefore)) return false
-        if (!locationsAfter.contentEquals(other.locationsAfter)) return false
-        if (feedbackId != other.feedbackId) return false
-        if (screenshot != other.screenshot) return false
-        if (step != other.step) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = userFeedback.hashCode()
-        result = 31 * result + userId.hashCode()
-        result = 31 * result + audio.hashCode()
-        result = 31 * result + locationsBefore.contentHashCode()
-        result = 31 * result + locationsAfter.contentHashCode()
-        result = 31 * result + feedbackId.hashCode()
-        result = 31 * result + screenshot.hashCode()
-        result = 31 * result + step.hashCode()
-        return result
-    }
 }

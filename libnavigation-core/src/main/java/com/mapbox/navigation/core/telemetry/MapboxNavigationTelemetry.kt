@@ -2,26 +2,26 @@ package com.mapbox.navigation.core.telemetry
 
 import android.content.Context
 import android.location.Location
-import com.mapbox.android.core.location.*
+import com.mapbox.android.core.location.LocationEngine
+import com.mapbox.android.core.location.LocationEngineCallback
+import com.mapbox.android.core.location.LocationEngineRequest
+import com.mapbox.android.core.location.LocationEngineResult
 import com.mapbox.android.telemetry.Event
 import com.mapbox.android.telemetry.MapboxTelemetry
-import com.mapbox.navigation.base.exceptions.NavigationException
 import com.mapbox.navigation.base.extensions.ifNonNull
 import com.mapbox.navigation.base.logger.model.Message
 import com.mapbox.navigation.base.logger.model.Tag
 import com.mapbox.navigation.base.trip.model.RouteProgress
-import com.mapbox.navigation.core.BuildConfig
 import com.mapbox.navigation.core.MapboxNavigation
-import com.mapbox.navigation.core.MapboxNavigationOptions
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.logger.MapboxLogger
+import com.mapbox.navigation.utils.exceptions.NavigationException
 import com.mapbox.navigation.utils.thread.ThreadController
 import com.mapbox.navigation.utils.thread.monitorChannelWithException
+import com.mapbox.navigation.utils.time.Time
 import java.util.Locale
 import java.util.UUID
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
@@ -42,13 +42,10 @@ private data class LocationBufferControl(val command: LocationBufferCommands, va
 internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     private lateinit var context: Context
     private lateinit var mapboxToken: String
-    private const val MAPBOX_NAVIGATION_USER_AGENT_BASE = "mapbox-navigation-android"
-    private const val MAPBOX_NAVIGATION_UI_USER_AGENT_BASE = "mapbox-navigation-ui-android"
 
     private val TAG = Tag("MAPBOX_TELEMETRY")
     private const val MAX_LOCATION_VALUES = 20
     private const val MAX_TELEMTRY_EVENTS = 100
-    private const val ONE_SECOND = 1000L
     private val telemetryEventsQueue = mutableListOf<TelemetryEventInterface>()
     private val jobControl = ThreadController.getIOScopeAndRootJob()
     private val locationBuffer = mutableListOf<Location>()
@@ -58,11 +55,6 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     private lateinit var mapboxTelemetry: MapboxTelemetry
     private lateinit var locationEngine: LocationEngine
 
-    // Location request settings
-    private val locationEngineRequest: LocationEngineRequest = LocationEngineRequest.Builder(ONE_SECOND)
-            .setPriority(LocationEngineRequest.PRIORITY_HIGH_ACCURACY)
-            .build()
-
     // Call back that receives
     private val routeProgressListener = object : RouteProgressObserver {
         override fun onRouteProgressChanged(routeProgress: RouteProgress) {
@@ -70,27 +62,16 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
         }
     }
 
-    // Return path of the loction callback. This will offer data on a channel that serializes location requests
+    // Return path of the location callback. This will offer data on a channel that serializes location requests
     private val locationCallback = object : LocationEngineCallback<LocationEngineResult> {
         override fun onSuccess(result: LocationEngineResult?) {
-            ifNonNull(result, result?.lastLocation) { _, lastLocation ->
+            ifNonNull(result?.lastLocation) { lastLocation ->
                 channelLocationBuffer.offer(LocationBufferControl(LocationBufferCommands.BUFFER_ADD, lastLocation))
             }
         }
 
         override fun onFailure(exception: Exception) {
             MapboxLogger.i(TAG, Message("location services exception: $exception"))
-        }
-    }
-
-    /**
-     * Obtains a user agent string based on where this code is being called from
-     */
-    private fun obtainUserAgent(options: MapboxNavigationOptions): String? {
-        return if (options.isFromNavigationUi) {
-            MAPBOX_NAVIGATION_UI_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
-        } else {
-            MAPBOX_NAVIGATION_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
         }
     }
 
@@ -116,35 +97,34 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     /**
      * One-time initializer. Called in responce to initialize() and then replaced with a no-op lambda to prevent multiple initialize() calls
      */
-    private val primaryInitializer: (Context, String, MapboxNavigation, LocationEngine) -> Unit = { context, token, mapboxNavigation, locationEngine ->
+    private val primaryInitializer: (Context, String, MapboxNavigation, LocationEngine, MapboxTelemetry, LocationEngineRequest) -> Boolean = { context, token, mapboxNavigation, locationEngine, telemetry, locationEngineRequest ->
         this.context = context
         mapboxToken = token
         this.locationEngine = locationEngine
-        val options = MapboxNavigationOptions.Builder().build()
         validateAccessToken(mapboxToken)
         initializer = postInitialize // prevent primaryInitializer() from being called more than once.
         postEventDelegate = postEventAfterInit // now that the object has been initialized we can post events
 
         registerForNotification(mapboxNavigation)
         monitorChannels()
-        val mapboxTelemetry = MapboxTelemetry(context, token, obtainUserAgent(options))
-        mapboxTelemetry.enable()
+        telemetry.enable()
 
         /**
          * Register a callback to receive location events. At most [MAX_LOCATION_VALUES] are stored
          */
         locationEngine.requestLocationUpdates(locationEngineRequest, locationCallback, null)
+        true
     }
     private var initializer = primaryInitializer
-    private var postInitialize: (Context, String, MapboxNavigation, LocationEngine) -> Unit = { _, _, _, _ -> }
+    private var postInitialize: (Context, String, MapboxNavigation, LocationEngine, MapboxTelemetry, LocationEngineRequest) -> Boolean = { _, _, _, _, _, _ -> false }
     fun initialize(
         context: Context,
         mapboxToken: String,
         mapboxNavigation: MapboxNavigation,
-        locationEngine: LocationEngine
-    ) {
-        initializer(context, mapboxToken, mapboxNavigation, locationEngine)
-    }
+        locationEngine: LocationEngine,
+        telemetry: MapboxTelemetry,
+        locationEngineRequest: LocationEngineRequest
+    ) = initializer(context, mapboxToken, mapboxNavigation, locationEngine, telemetry, locationEngineRequest)
 
     /**
      * This method is used to post all types of telemetry events to the back-end server.
@@ -230,27 +210,25 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
         return retVal.toTypedArray()
     }
 
-    private fun parseRouteProgressAsync(): Deferred<TelemetryStep> {
-        return jobControl.scope.async {
-            val telemetryStep = TelemetryStep() // Default initialization
-            val routeProgress = channelOnRouteProgress.receive()
-            routeProgress.currentLegProgress()?.upcomingStep()?.let { legStep ->
-                telemetryStep.distance = legStep.distance().toInt()
-                telemetryStep.distanceRemaining = routeProgress.distanceRemaining().toInt()
-                telemetryStep.duration = legStep.duration().toInt()
-                telemetryStep.durationRemaining = routeProgress.durationRemaining().toInt()
-                telemetryStep.previousModifier = routeProgress.currentLegProgress()?.currentStepProgress()?.step()?.maneuver()?.modifier()
-                        ?: ""
-                telemetryStep.previousName = routeProgress.currentLegProgress()?.currentStepProgress()?.step()?.name()
-                        ?: ""
-                telemetryStep.previousType = routeProgress.currentLegProgress()?.currentStepProgress()?.step()?.maneuver()?.type()
-                        ?: ""
-                telemetryStep.upcomingType = legStep.maneuver().type() ?: ""
-                telemetryStep.upcomingModifier = legStep.maneuver().modifier() ?: ""
-                telemetryStep.upcomingName = legStep.name() ?: ""
-            }
-            telemetryStep
+    private suspend fun parseRouteProgress(): TelemetryStep {
+        val telemetryStep = TelemetryStep() // Default initialization
+        val routeProgress = channelOnRouteProgress.receive()
+        routeProgress.currentLegProgress()?.upcomingStep()?.let { legStep ->
+            telemetryStep.distance = legStep.distance().toInt()
+            telemetryStep.distanceRemaining = routeProgress.distanceRemaining().toInt()
+            telemetryStep.duration = legStep.duration().toInt()
+            telemetryStep.durationRemaining = routeProgress.durationRemaining().toInt()
+            telemetryStep.previousModifier = routeProgress.currentLegProgress()?.currentStepProgress()?.step()?.maneuver()?.modifier()
+                    ?: ""
+            telemetryStep.previousName = routeProgress.currentLegProgress()?.currentStepProgress()?.step()?.name()
+                    ?: ""
+            telemetryStep.previousType = routeProgress.currentLegProgress()?.currentStepProgress()?.step()?.maneuver()?.type()
+                    ?: ""
+            telemetryStep.upcomingType = legStep.maneuver().type() ?: ""
+            telemetryStep.upcomingModifier = legStep.maneuver().modifier() ?: ""
+            telemetryStep.upcomingName = legStep.name() ?: ""
         }
+        return telemetryStep
     }
 
     /**
@@ -260,20 +238,19 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     private suspend fun populateUserFeedbackEvent(event: TelemetryEventFeedback): TelemetryEventInterface {
         val phoneState = PhoneState(context)
 
-        val feedbackEvent = TelemetryUserFeedbackWrapper(event,
+        return TelemetryUserFeedbackWrapper(event,
                 phoneState.userId,
                 phoneState.audioType,
-                getDatePartitionedLocations { location -> location.time < System.currentTimeMillis() },
-                getDatePartitionedLocations { location -> location.time > System.currentTimeMillis() },
+                getDatePartitionedLocations { location -> location.time < Time.SystemImpl.millis() },
+                getDatePartitionedLocations { location -> location.time > Time.SystemImpl.millis() },
                 UUID.randomUUID().toString(),
                 event.screenShot,
-                parseRouteProgressAsync().await()
+                parseRouteProgress()
         )
-        return feedbackEvent
     }
 
     /**
-     * TODO:OZ add code to handle all other event types. Once implmented, instead of throwing an exception the code
+     * TODO:OZ add code to handle all other event types. Once implemented, instead of throwing an exception the code
      * should log an error
      */
     private suspend fun populateTelemetryEventWrapper(event: TelemetryEventInterface): TelemetryEventInterface? =
@@ -282,15 +259,14 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
                 else -> throw(NavigationException("Unsupported telemetry event"))
             }
 
-    private fun validateAccessToken(token: String?) {
-        token?.let { accessToken ->
-            if (accessToken.isEmpty() || !accessToken.toLowerCase(Locale.US).startsWith("pk.") && !accessToken.toLowerCase(
-                            Locale.US
-                    ).startsWith("sk.")
-            ) {
-                throw NavigationException("A valid access token must be passed in when first initializing MapboxNavigation")
-            }
+    private fun validateAccessToken(accessToken: String?) {
+        if (accessToken.isNullOrEmpty() || !accessToken.toLowerCase(Locale.US).startsWith("pk.") && !accessToken.toLowerCase(
+                        Locale.US
+                ).startsWith("sk.")
+        ) {
+            throw NavigationException("A valid access token must be passed in when first initializing MapboxNavigation")
+        } else {
+            throw NavigationException("A valid access token must be passed in when first initializing MapboxNavigation")
         }
-                ?: throw NavigationException("A valid access token must be passed in when first initializing MapboxNavigation")
     }
 }

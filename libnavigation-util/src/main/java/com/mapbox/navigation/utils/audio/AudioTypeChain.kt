@@ -1,6 +1,6 @@
 package com.mapbox.navigation.core.telemetry.audio
 
-internal class AudioTypeChain {
+class AudioTypeChain {
 
     fun setup(
         unknownAudioType: AudioTypeResolver.Unknown = AudioTypeResolver.Unknown(),
