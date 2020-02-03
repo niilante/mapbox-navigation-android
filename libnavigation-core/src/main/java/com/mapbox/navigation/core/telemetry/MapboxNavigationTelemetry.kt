@@ -54,6 +54,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     private lateinit var cleanupJob: Job
     private lateinit var mapboxTelemetry: MapboxTelemetry
     private lateinit var locationEngine: LocationEngine
+    private lateinit var phoneState: PhoneState
 
     // Call back that receives
     private val routeProgressListener = object : RouteProgressObserver {
@@ -97,14 +98,14 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     /**
      * One-time initializer. Called in responce to initialize() and then replaced with a no-op lambda to prevent multiple initialize() calls
      */
-    private val primaryInitializer: (Context, String, MapboxNavigation, LocationEngine, MapboxTelemetry, LocationEngineRequest) -> Boolean = { context, token, mapboxNavigation, locationEngine, telemetry, locationEngineRequest ->
+    private val primaryInitializer: (Context, String, MapboxNavigation, LocationEngine, MapboxTelemetry, LocationEngineRequest, PhoneState) -> Boolean = { context, token, mapboxNavigation, locationEngine, telemetry, locationEngineRequest, phoneState ->
         this.context = context
         mapboxToken = token
         this.locationEngine = locationEngine
         validateAccessToken(mapboxToken)
         initializer = postInitialize // prevent primaryInitializer() from being called more than once.
         postEventDelegate = postEventAfterInit // now that the object has been initialized we can post events
-
+        this.phoneState = phoneState
         registerForNotification(mapboxNavigation)
         monitorChannels()
         telemetry.enable()
@@ -116,15 +117,16 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
         true
     }
     private var initializer = primaryInitializer
-    private var postInitialize: (Context, String, MapboxNavigation, LocationEngine, MapboxTelemetry, LocationEngineRequest) -> Boolean = { _, _, _, _, _, _ -> false }
+    private var postInitialize: (Context, String, MapboxNavigation, LocationEngine, MapboxTelemetry, LocationEngineRequest, PhoneState) -> Boolean = { _, _, _, _, _, _, _ -> false }
     fun initialize(
         context: Context,
         mapboxToken: String,
         mapboxNavigation: MapboxNavigation,
         locationEngine: LocationEngine,
         telemetry: MapboxTelemetry,
-        locationEngineRequest: LocationEngineRequest
-    ) = initializer(context, mapboxToken, mapboxNavigation, locationEngine, telemetry, locationEngineRequest)
+        locationEngineRequest: LocationEngineRequest,
+        phoneState: PhoneState
+    ) = initializer(context, mapboxToken, mapboxNavigation, locationEngine, telemetry, locationEngineRequest, phoneState)
 
     /**
      * This method is used to post all types of telemetry events to the back-end server.
@@ -235,19 +237,16 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
      * TODO:OZ add one of these for each telemetry event
      * Generates a well-formed Feedback event.
      */
-    private suspend fun populateUserFeedbackEvent(event: TelemetryEventFeedback): TelemetryEventInterface {
-        val phoneState = PhoneState(context)
-
-        return TelemetryUserFeedbackWrapper(event,
-                phoneState.userId,
-                phoneState.audioType,
-                getDatePartitionedLocations { location -> location.time < Time.SystemImpl.millis() },
-                getDatePartitionedLocations { location -> location.time > Time.SystemImpl.millis() },
-                UUID.randomUUID().toString(),
-                event.screenShot,
-                parseRouteProgress()
-        )
-    }
+    private suspend fun populateUserFeedbackEvent(event: TelemetryEventFeedback): TelemetryEventInterface =
+            TelemetryUserFeedbackWrapper(event,
+                    phoneState.userId,
+                    phoneState.audioType,
+                    getDatePartitionedLocations { location -> location.time < Time.SystemImpl.millis() },
+                    getDatePartitionedLocations { location -> location.time > Time.SystemImpl.millis() },
+                    UUID.randomUUID().toString(),
+                    event.screenShot,
+                    parseRouteProgress()
+            )
 
     /**
      * TODO:OZ add code to handle all other event types. Once implemented, instead of throwing an exception the code
@@ -260,12 +259,10 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
             }
 
     private fun validateAccessToken(accessToken: String?) {
-        if (accessToken.isNullOrEmpty() || !accessToken.toLowerCase(Locale.US).startsWith("pk.") && !accessToken.toLowerCase(
-                        Locale.US
-                ).startsWith("sk.")
+        if (accessToken.isNullOrEmpty() ||
+                !accessToken.toLowerCase(Locale.US).startsWith("pk.") &&
+                !accessToken.toLowerCase(Locale.US).startsWith("sk.")
         ) {
-            throw NavigationException("A valid access token must be passed in when first initializing MapboxNavigation")
-        } else {
             throw NavigationException("A valid access token must be passed in when first initializing MapboxNavigation")
         }
     }

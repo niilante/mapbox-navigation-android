@@ -30,6 +30,7 @@ import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.navigation.core.directions.session.RoutesRequestCallback
 import com.mapbox.navigation.core.module.NavigationModuleProvider
 import com.mapbox.navigation.core.telemetry.MapboxNavigationTelemetry
+import com.mapbox.navigation.core.telemetry.PhoneState
 import com.mapbox.navigation.core.trip.service.TripService
 import com.mapbox.navigation.core.trip.session.BannerInstructionsObserver
 import com.mapbox.navigation.core.trip.session.LocationObserver
@@ -129,7 +130,7 @@ class MapboxNavigation(
                     this,
                     LocationEngineProvider.getBestLocationEngine(context.applicationContext),
                     MapboxTelemetry(context, token, obtainUserAgent()),
-                    locationEngineRequest)
+                    locationEngineRequest, PhoneState(context))
         }
         directionsSession = NavigationComponentProvider.createDirectionsSession(
                 NavigationModuleProvider.createModule(
