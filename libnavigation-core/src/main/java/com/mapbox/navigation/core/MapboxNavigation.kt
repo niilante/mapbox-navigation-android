@@ -30,7 +30,6 @@ import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.navigation.core.directions.session.RoutesRequestCallback
 import com.mapbox.navigation.core.module.NavigationModuleProvider
 import com.mapbox.navigation.core.telemetry.MapboxNavigationTelemetry
-import com.mapbox.navigation.core.telemetry.PhoneState
 import com.mapbox.navigation.core.trip.service.TripService
 import com.mapbox.navigation.core.trip.session.BannerInstructionsObserver
 import com.mapbox.navigation.core.trip.session.LocationObserver
@@ -46,6 +45,8 @@ import com.mapbox.navigation.utils.thread.ThreadController
 import com.mapbox.navigation.utils.thread.monitorChannelWithException
 import java.lang.reflect.Field
 import kotlinx.coroutines.channels.ReceiveChannel
+
+private const val LOCATION_REQUST_INTERVAL = 1000L
 
 /**
  * ## Mapbox Navigation Core SDK
@@ -114,6 +115,7 @@ class MapboxNavigation(
     private val internalOffRouteObserver = createInternalOffRouteObserver()
 
     private val MAPBOX_NAVIGATION_USER_AGENT_BASE = "mapbox-navigation-android"
+    private val MAPBOX_NAVIGATION_UI_USER_AGENT_BASE = "mapbox-navigation-ui-android"
     private var notificationChannelField: Field? = null
 
     /**
@@ -138,8 +140,8 @@ class MapboxNavigation(
                         ::paramsProvider
                 )
         )
-        directionsSession.registerRoutesObserver(internalRoutesObserver)
-        directionsSession.registerRoutesObserver(navigationSession)
+        directionsSession.registerRouteObserver(internalRouteObserver)
+        directionsSession.registerRouteObserver(navigationSession)
 
         val notification: TripNotification = NavigationModuleProvider.createModule(
                 MapboxNavigationModuleType.TripNotification,
@@ -401,6 +403,16 @@ class MapboxNavigation(
         tripSession.unregisterStateObserver(tripSessionStateObserver)
     }
 
+    private fun obtainUserAgent(): String? {
+        val options = MapboxNavigationOptions.Builder().build()
+        return if (options.isFromNavigationUi) {
+            MAPBOX_NAVIGATION_UI_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
+        } else {
+            MAPBOX_NAVIGATION_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
+        }
+    }
+
+    private fun createInternalRouteObserver() = object : RouteObserver {
     private fun createInternalRoutesObserver() = object : RoutesObserver {
         override fun onRoutesChanged(routes: List<DirectionsRoute>) {
             if (routes.isNotEmpty()) {
