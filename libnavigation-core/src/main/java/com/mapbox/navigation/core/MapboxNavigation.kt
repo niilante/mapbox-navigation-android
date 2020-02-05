@@ -132,7 +132,7 @@ class MapboxNavigation(
                     this,
                     LocationEngineProvider.getBestLocationEngine(context.applicationContext),
                     MapboxTelemetry(context, token, obtainUserAgent()),
-                    locationEngineRequest, PhoneState(context))
+                    locationEngineRequest)
         }
         directionsSession = NavigationComponentProvider.createDirectionsSession(
                 NavigationModuleProvider.createModule(
@@ -140,8 +140,8 @@ class MapboxNavigation(
                         ::paramsProvider
                 )
         )
-        directionsSession.registerRouteObserver(internalRouteObserver)
-        directionsSession.registerRouteObserver(navigationSession)
+        directionsSession.registerRoutesObserver(internalRoutesObserver)
+        directionsSession.registerRoutesObserver(navigationSession)
 
         val notification: TripNotification = NavigationModuleProvider.createModule(
                 MapboxNavigationModuleType.TripNotification,
@@ -403,147 +403,137 @@ class MapboxNavigation(
         tripSession.unregisterStateObserver(tripSessionStateObserver)
     }
 
-    private fun obtainUserAgent(): String? {
-        val options = MapboxNavigationOptions.Builder().build()
-        return if (options.isFromNavigationUi) {
-            MAPBOX_NAVIGATION_UI_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
-        } else {
-            MAPBOX_NAVIGATION_USER_AGENT_BASE + BuildConfig.MAPBOX_NAVIGATION_VERSION_NAME
-        }
-    }
-
-    private fun createInternalRouteObserver() = object : RouteObserver {
-    private fun createInternalRoutesObserver() = object : RoutesObserver {
-        override fun onRoutesChanged(routes: List<DirectionsRoute>) {
-            if (routes.isNotEmpty()) {
-                tripSession.route = routes[0]
-            } else {
-                tripSession.route = null
+        private fun createInternalRoutesObserver() = object : RoutesObserver {
+            override fun onRoutesChanged(routes: List<DirectionsRoute>) {
+                if (routes.isNotEmpty()) {
+                    tripSession.route = routes[0]
+                } else {
+                    tripSession.route = null
+                }
             }
         }
-    }
 
-    private fun createInternalOffRouteObserver() = object : OffRouteObserver {
-        override fun onOffRouteStateChanged(offRoute: Boolean) {
-            if (offRoute) {
-                reRoute()
+        private fun createInternalOffRouteObserver() = object : OffRouteObserver {
+            override fun onOffRouteStateChanged(offRoute: Boolean) {
+                if (offRoute) {
+                    reRoute()
+                }
             }
         }
-    }
 
-    private fun reRoute() {
-        ifNonNull(
-            directionsSession.getRouteOptions(),
-            tripSession.getRawLocation()
-        ) { options, location ->
-            val optionsBuilder = options.toBuilder()
-            val coordinates = options.coordinates()
-            tripSession.getRouteProgress()?.currentLegProgress()?.legIndex()?.let { index ->
-                optionsBuilder.coordinates(
-                    coordinates.drop(index + 1).toMutableList().apply {
-                        add(0, Point.fromLngLat(location.longitude, location.latitude))
-                    }
-                )
-
-                val bearingElements = options.bearings()?.split(";")
-                val originTolerance =
-                    bearingElements?.getOrNull(0)?.split(",")?.getOrNull(1)?.toDouble()
-                bearingElements?.subList(index + 1, coordinates.size)?.map { element ->
-                    element.split(",").let { components ->
-                        if (components.size == 2) {
-                            Pair(components[0].toDouble(), components[1].toDouble())
-                        } else {
-                            null
-                        }
-                    }
-                }?.toMutableList()?.also { pairs ->
-                    pairs.add(
-                        0,
-                        Pair(
-                            location.bearing.toDouble(),
-                            originTolerance ?: DEFAULT_REROUTE_BEARING_TOLERANCE
-                        )
+        private fun reRoute() {
+            ifNonNull(
+                    directionsSession.getRouteOptions(),
+                    tripSession.getRawLocation()
+            ) { options, location ->
+                val optionsBuilder = options.toBuilder()
+                val coordinates = options.coordinates()
+                tripSession.getRouteProgress()?.currentLegProgress()?.legIndex()?.let { index ->
+                    optionsBuilder.coordinates(
+                            coordinates.drop(index + 1).toMutableList().apply {
+                                add(0, Point.fromLngLat(location.longitude, location.latitude))
+                            }
                     )
-                    optionsBuilder.bearings(*pairs.toTypedArray())
+
+                    val bearingElements = options.bearings()?.split(";")
+                    val originTolerance =
+                            bearingElements?.getOrNull(0)?.split(",")?.getOrNull(1)?.toDouble()
+                    bearingElements?.subList(index + 1, coordinates.size)?.map { element ->
+                        element.split(",").let { components ->
+                            if (components.size == 2) {
+                                Pair(components[0].toDouble(), components[1].toDouble())
+                            } else {
+                                null
+                            }
+                        }
+                    }?.toMutableList()?.also { pairs ->
+                        pairs.add(
+                                0,
+                                Pair(
+                                        location.bearing.toDouble(),
+                                        originTolerance ?: DEFAULT_REROUTE_BEARING_TOLERANCE
+                                )
+                        )
+                        optionsBuilder.bearings(*pairs.toTypedArray())
+                    }
+
+                    // todo implement options.radiuses
+                    // todo implement options.approaches
+                    // todo implement options.waypointIndices
+                    // todo implement options.waypointNames
+                    // todo implement options.waypointTargets
                 }
 
-                // todo implement options.radiuses
-                // todo implement options.approaches
-                // todo implement options.waypointIndices
-                // todo implement options.waypointNames
-                // todo implement options.waypointTargets
-            }
-
-            val optionsRebuilt = optionsBuilder.build()
-            directionsSession.requestRoutes(
-                optionsRebuilt,
-                defaultRoutesRequestCallback // todo cache the original callback and reach out to the user before setting the route
-            )
-        }
-    }
-
-    private fun monitorNotificationActionButton(channel: ReceiveChannel<NotificationAction>) {
-        mainJobController.scope.monitorChannelWithException(channel, { notificationAction ->
-            when (notificationAction) {
-                NotificationAction.END_NAVIGATION -> tripSession.stop()
-            }
-        })
-    }
-
-    /**
-     * Provides parameters for Mapbox default modules, recursively if a module depends on other Mapbox modules.
-     */
-    private fun paramsProvider(type: MapboxNavigationModuleType): Array<Pair<Class<*>?, Any?>> {
-        return when (type) {
-            MapboxNavigationModuleType.HybridRouter -> arrayOf(
-                Router::class.java to NavigationModuleProvider.createModule(
-                    MapboxNavigationModuleType.OnboardRouter,
-                    ::paramsProvider
-                ),
-                Router::class.java to NavigationModuleProvider.createModule(
-                    MapboxNavigationModuleType.OffboardRouter,
-                    ::paramsProvider
+                val optionsRebuilt = optionsBuilder.build()
+                directionsSession.requestRoutes(
+                        optionsRebuilt,
+                        defaultRoutesRequestCallback // todo cache the original callback and reach out to the user before setting the route
                 )
-            )
-            MapboxNavigationModuleType.OffboardRouter -> arrayOf(
-                String::class.java to (accessToken
-                    ?: throw RuntimeException("You need to provide an access in order to use the default OffboardRouter.")),
-                Context::class.java to context,
-                SkuTokenProvider::class.java to MapboxNavigationAccounts.getInstance(context)
-            )
-            MapboxNavigationModuleType.OnboardRouter -> arrayOf()
-            MapboxNavigationModuleType.DirectionsSession -> throw NotImplementedError() // going to be removed when next base version
-            MapboxNavigationModuleType.TripNotification -> arrayOf(
-                Context::class.java to context.applicationContext,
-                NavigationOptions::class.java to navigationOptions
-            )
-            MapboxNavigationModuleType.TripService -> throw NotImplementedError() // going to be removed when next base version
-            MapboxNavigationModuleType.TripSession -> throw NotImplementedError() // going to be removed when next base version
-            MapboxNavigationModuleType.Logger -> arrayOf()
+            }
         }
-    }
 
-    companion object {
-        private const val DEFAULT_REROUTE_BEARING_TOLERANCE = 90.0
+        private fun monitorNotificationActionButton(channel: ReceiveChannel<NotificationAction>) {
+            mainJobController.scope.monitorChannelWithException(channel, { notificationAction ->
+                when (notificationAction) {
+                    NotificationAction.END_NAVIGATION -> tripSession.stop()
+                }
+            })
+        }
 
         /**
-         * Returns a pre-build set of [NavigationOptions] with smart defaults.
-         *
-         * Use [NavigationOptions.toBuilder] to easily customize selected options.
+         * Provides parameters for Mapbox default modules, recursively if a module depends on other Mapbox modules.
          */
-        @JvmStatic
-        fun defaultNavigationOptions(context: Context): NavigationOptions {
-            return NavigationOptions.Builder(
-                NONE_SPECIFIED,
-                ROUNDING_INCREMENT_FIFTY,
-                DEFAULT_NAVIGATOR_POLLING_DELAY,
-                MapboxDistanceFormatter(
-                    context.applicationContext,
-                    null,
-                    UNDEFINED,
-                    ROUNDING_INCREMENT_FIFTY
+        private fun paramsProvider(type: MapboxNavigationModuleType): Array<Pair<Class<*>?, Any?>> {
+            return when (type) {
+                MapboxNavigationModuleType.HybridRouter -> arrayOf(
+                        Router::class.java to NavigationModuleProvider.createModule(
+                                MapboxNavigationModuleType.OnboardRouter,
+                                ::paramsProvider
+                        ),
+                        Router::class.java to NavigationModuleProvider.createModule(
+                                MapboxNavigationModuleType.OffboardRouter,
+                                ::paramsProvider
+                        )
                 )
-            ).build()
+                MapboxNavigationModuleType.OffboardRouter -> arrayOf(
+                        String::class.java to (accessToken
+                                ?: throw RuntimeException("You need to provide an access in order to use the default OffboardRouter.")),
+                        Context::class.java to context,
+                        SkuTokenProvider::class.java to MapboxNavigationAccounts.getInstance(context)
+                )
+                MapboxNavigationModuleType.OnboardRouter -> arrayOf()
+                MapboxNavigationModuleType.DirectionsSession -> throw NotImplementedError() // going to be removed when next base version
+                MapboxNavigationModuleType.TripNotification -> arrayOf(
+                        Context::class.java to context.applicationContext,
+                        NavigationOptions::class.java to navigationOptions
+                )
+                MapboxNavigationModuleType.TripService -> throw NotImplementedError() // going to be removed when next base version
+                MapboxNavigationModuleType.TripSession -> throw NotImplementedError() // going to be removed when next base version
+                MapboxNavigationModuleType.Logger -> arrayOf()
+            }
+        }
+
+        companion object {
+            private const val DEFAULT_REROUTE_BEARING_TOLERANCE = 90.0
+
+            /**
+             * Returns a pre-build set of [NavigationOptions] with smart defaults.
+             *
+             * Use [NavigationOptions.toBuilder] to easily customize selected options.
+             */
+            @JvmStatic
+            fun defaultNavigationOptions(context: Context): NavigationOptions {
+                return NavigationOptions.Builder(
+                        NONE_SPECIFIED,
+                        ROUNDING_INCREMENT_FIFTY,
+                        DEFAULT_NAVIGATOR_POLLING_DELAY,
+                        MapboxDistanceFormatter(
+                                context.applicationContext,
+                                null,
+                                UNDEFINED,
+                                ROUNDING_INCREMENT_FIFTY
+                        )
+                ).build()
+            }
         }
     }
-}

@@ -27,6 +27,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.TestOnly
 
 private enum class LocationBufferCommands {
     BUFFER_ADD,
@@ -126,6 +127,17 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
         locationEngineRequest: LocationEngineRequest
     ) = initializer(context, mapboxToken, mapboxNavigation, locationEngine, telemetry, locationEngineRequest)
 
+    @TestOnly
+    fun pauseTelemetry(flag: Boolean) {
+        initializer = when (flag) {
+            true -> {
+                primaryInitializer
+            }
+            false -> {
+                postInitialize
+            }
+        }
+    }
     /**
      * This method is used to post all types of telemetry events to the back-end server.
      * The [event] parameter represents one of several Telemetry events available
