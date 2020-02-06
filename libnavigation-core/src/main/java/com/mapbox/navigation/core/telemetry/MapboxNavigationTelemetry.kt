@@ -2,6 +2,7 @@ package com.mapbox.navigation.core.telemetry
 
 import android.content.Context
 import android.location.Location
+import com.google.gson.Gson
 import com.mapbox.android.core.location.LocationEngine
 import com.mapbox.android.core.location.LocationEngineCallback
 import com.mapbox.android.core.location.LocationEngineRequest
@@ -22,6 +23,8 @@ import com.mapbox.navigation.utils.thread.monitorChannelWithException
 import com.mapbox.navigation.utils.time.Time
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -48,11 +51,12 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     private val TAG = Tag("MAPBOX_TELEMETRY")
     private const val MAX_LOCATION_VALUES = 20
     private const val MAX_TELEMTRY_EVENTS = 100
-    private val telemetryEventsQueue = mutableListOf<TelemetryEventInterface>()
+    private val telemetryEventsQueue = mutableListOf<MetricEvent>()
     private val jobControl = ThreadController.getIOScopeAndRootJob()
     private val locationBuffer = mutableListOf<Location>()
     private val channelLocationBuffer = Channel<LocationBufferControl>(MAX_LOCATION_VALUES)
     private val channelOnRouteProgress = Channel<RouteProgress>(Channel.CONFLATED) // we want just the last notification
+    private val channelTelemetryEvent = Channel<MetricEvent>(Channel.CONFLATED) // used in testing to sample the events sent to the server
     private lateinit var cleanupJob: Job
     private lateinit var mapboxTelemetry: MapboxTelemetry
     private lateinit var locationEngine: LocationEngine
@@ -109,6 +113,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
         registerForNotification(mapboxNavigation)
         monitorChannels()
         telemetry.enable()
+        channelOnRouteProgress.offer(RouteProgress.Builder().build()) // initially offer an empty route progress so that non-driving telemetry events (like user feedback) can be processed
 
         /**
          * Register a callback to receive location events. At most [MAX_LOCATION_VALUES] are stored
@@ -138,6 +143,16 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
             }
         }
     }
+    @TestOnly
+    suspend fun dumpTelemetryJsonPayloadAsync(): Deferred<String> {
+        val result = CompletableDeferred<String>()
+        jobControl.scope.monitorChannelWithException(channelTelemetryEvent, predicate = { event ->
+            result.complete(Gson().toJson(event))
+        })
+
+        return result
+    }
+
     /**
      * This method is used to post all types of telemetry events to the back-end server.
      * The [event] parameter represents one of several Telemetry events available
@@ -148,13 +163,17 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
 
     private fun postEvent(event: TelemetryEventInterface) {
         jobControl.scope.launch {
-            withContext(ThreadController.IODispatcher) { populateTelemetryEventWrapper(event) }?.let { telemetryEvent ->
+            withContext(ThreadController.IODispatcher) {
+                val data = populateTelemetryEventWrapper(event)
+                data
+            }?.let { telemetryEvent ->
                 updateEventsQueue(telemetryEvent)
+                telemetryEvent
             }
         }
     }
 
-    private fun updateEventsQueue(telemetryEvent: TelemetryEventInterface) {
+    private fun updateEventsQueue(telemetryEvent: MetricEvent) {
         telemetryEventsQueue.add(telemetryEvent)
         if (telemetryEventsQueue.size >= MAX_TELEMTRY_EVENTS) {
             telemetryEventsQueue.forEach { event ->
@@ -162,6 +181,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
             }
             telemetryEventsQueue.clear()
         }
+        channelTelemetryEvent.offer(telemetryEvent)
         telemetryEventsQueue.add(telemetryEvent)
     }
 
@@ -249,7 +269,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
      * TODO:OZ add one of these for each telemetry event
      * Generates a well-formed Feedback event.
      */
-    private suspend fun populateUserFeedbackEvent(event: TelemetryEventFeedback): TelemetryEventInterface =
+    private suspend fun populateUserFeedbackEvent(event: TelemetryEventFeedback): MetricEvent =
             TelemetryUserFeedbackWrapper(event,
                     TelemetryUtils.retrieveVendorId(),
                     NavigationUtils.obtainAudioType(context),
@@ -258,13 +278,13 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
                     UUID.randomUUID().toString(),
                     event.screenShot,
                     parseRouteProgress()
-            )
+            ).toMetricEvent()
 
     /**
      * TODO:OZ add code to handle all other event types. Once implemented, instead of throwing an exception the code
      * should log an error
      */
-    private suspend fun populateTelemetryEventWrapper(event: TelemetryEventInterface): TelemetryEventInterface? =
+    private suspend fun populateTelemetryEventWrapper(event: TelemetryEventInterface): MetricEvent? =
             when (event) {
                 is TelemetryEventFeedback -> populateUserFeedbackEvent(event)
                 else -> throw(NavigationException("Unsupported telemetry event"))

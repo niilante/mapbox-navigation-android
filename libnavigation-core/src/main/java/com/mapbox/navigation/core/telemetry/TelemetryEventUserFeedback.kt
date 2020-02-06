@@ -50,7 +50,9 @@ internal data class TelemetryUserFeedbackWrapper(
     val screenshot: String,
     val step: TelemetryStep
 ) : TelemetryEventInterface, MetricEvent {
-
+    fun toMetricEvent(): MetricEvent {
+        return this
+    }
     override val metricName = NavigationMetrics.FEEDBACK
 
     override fun toJson(gson: Gson): String =
