@@ -1,4 +1,4 @@
-package com.mapbox.navigation.core
+package com.mapbox.navigation.testing
 
 import android.app.AlarmManager
 import android.app.NotificationManager
@@ -9,9 +9,9 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import android.location.LocationManager
 import android.media.AudioManager
+import com.mapbox.android.accounts.v1.AccountsConstants.MAPBOX_SHARED_PREFERENCES
 import com.mapbox.android.core.location.LocationEngine
 import com.mapbox.android.core.location.LocationEngineProvider
-import com.mapbox.android.telemetry.MapboxTelemetryConstants.MAPBOX_SHARED_PREFERENCES
 import io.mockk.Runs
 import io.mockk.every
 import io.mockk.just
@@ -34,7 +34,6 @@ fun createContext(): Context {
     val notificationManager = mockk<NotificationManager>(relaxed = true)
     every { mockedContext.getSystemService(Context.NOTIFICATION_SERVICE) } returns (notificationManager)
     every { mockedContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager } returns mockk(relaxed = true)
-    every { mockedContext.getSystemService(Context.LOCATION_SERVICE) as LocationEngine } returns mockk(relaxed = true)
     every { LocationEngineProvider.getBestLocationEngine(mockedContext) } returns mockk(relaxed = true)
     every {
         mockedContext.registerReceiver(
@@ -57,5 +56,6 @@ fun createContext(): Context {
     every { mockedContext.applicationContext.getPackageManager() } returns mockk(relaxed = true)
     every { mockedContext.applicationContext.getPackageName() } returns "MyPackageName"
     every { mockedContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager } returns mockk(relaxed = true)
+    every { mockedContext.applicationContext.applicationContext } returns mockk(relaxed = true)
     return mockedContext
 }

@@ -4,6 +4,7 @@ import android.location.Location
 import com.google.gson.Gson
 
 internal enum class FeedbackType(val feedbackType: String) {
+    FEEDBACK_TYPE_GENERAL("general"),
     FEEDBACK_TYPE_ACCIDENT("accident"),
     FEEDBACK_TYPE_HAZARD("hazard"),
     FEEDBACK_TYPE_ROAD_CLOSED("road_closed"),

@@ -13,6 +13,7 @@ import com.mapbox.navigation.core.telemetry.FeedbackType
 import com.mapbox.navigation.core.telemetry.MapboxNavigationTelemetry
 import com.mapbox.navigation.core.telemetry.MapboxNavigationTelemetry.dumpTelemetryJsonPayloadAsync
 import com.mapbox.navigation.core.telemetry.TelemetryEventFeedback
+import com.mapbox.navigation.testing.createContext
 import com.mapbox.navigation.utils.thread.JobControl
 import com.mapbox.navigation.utils.thread.ThreadController
 import io.mockk.Runs

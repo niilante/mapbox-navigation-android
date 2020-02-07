@@ -22,8 +22,10 @@ android {
 }
 
 dependencies {
-    api dependenciesList.androidxTestJunit
+    implementation project(":libnavigation-core")
+    implementation dependenciesList.mapboxAndroidAccounts
 
+    api dependenciesList.androidxTestJunit
     api(dependenciesList.barista) {
         exclude group: 'org.jetbrains.kotlin'
         exclude group: 'androidx.annotation'

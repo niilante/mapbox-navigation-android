@@ -126,14 +126,6 @@ class MapboxNavigation(
 
     init {
         ThreadController.init()
-        ifNonNull(accessToken) { token ->
-            MapboxNavigationTelemetry.initialize(context.applicationContext,
-                    token,
-                    this,
-                    LocationEngineProvider.getBestLocationEngine(context.applicationContext),
-                    MapboxTelemetry(context, token, obtainUserAgent()),
-                    locationEngineRequest)
-        }
         directionsSession = NavigationComponentProvider.createDirectionsSession(
                 NavigationModuleProvider.createModule(
                         MapboxNavigationModuleType.OffboardRouter,
@@ -165,6 +157,14 @@ class MapboxNavigation(
         )
         tripSession.registerOffRouteObserver(internalOffRouteObserver)
         tripSession.registerStateObserver(navigationSession)
+        ifNonNull(accessToken) { token ->
+            MapboxNavigationTelemetry.initialize(context.applicationContext,
+                    token,
+                    this,
+                    locationEngine,
+                    MapboxTelemetry(context, token, obtainUserAgent()),
+                    locationEngineRequest)
+        }
     }
 
     /**
